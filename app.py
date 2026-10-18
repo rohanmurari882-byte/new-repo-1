@@ -52,24 +52,35 @@ def fetch_and_clean_ledger():
     return df
 
 def parse_and_answer(question: str, df: pd.DataFrame) -> str:
-    """Uses helper maps and regex matching to handle different question phrasings seamlessly."""
+    """Handles both counts and revenue calculations for paid, refunded, or void orders."""
     q = question.lower()
     
-    # Month parser map
+    # Month mapping helper
     months = {
         "january": 1, "february": 2, "march": 3, "april": 4, "may": 5, "june": 6,
         "july": 7, "august": 8, "september": 9, "october": 10, "november": 11, "december": 12
     }
     
-    # Extract structural constraints from question string
+    # 1. Extract Date Constraints
     target_month = next((m_num for m_name, m_num in months.items() if m_name in q), None)
     target_year = next((int(yr) for str_yr in re.findall(r"\b\d{4}\b", q) if (yr := int(str_yr))), None)
+    
+    # 2. Extract Region Constraint
     target_region = next((reg for reg in ["north", "south", "east", "west", "central"] if reg in q), None)
     
-    # Base filter condition rules: only paid orders count toward total revenue criteria
-    filtered_df = df[df["status"] == "paid"].copy()
+    # 3. Extract Status Constraint (paid, refunded, void)
+    target_status = "paid"  # default standard
+    if "refund" in q:
+        target_status = "refunded"
+    elif "void" in q:
+        target_status = "void"
+
+    # Apply Filters to the Dataframe
+    filtered_df = df.copy()
     
-    # Execute filters dynamically depending on detected query parameters
+    if target_status:
+        filtered_df = filtered_df[filtered_df["status"] == target_status]
+        
     if target_region:
         filtered_df = filtered_df[filtered_df["region"].str.lower() == target_region]
         
@@ -79,11 +90,14 @@ def parse_and_answer(question: str, df: pd.DataFrame) -> str:
             (filtered_df["updated_at"].dt.year == target_year)
         ]
         
-    # Finalize mathematical calculation
-    total_revenue_usd = filtered_df["amount_usd"].sum()
-    
-    # Format directly to the exact floating cent point string required
-    return f"{total_revenue_usd:.2f}"
+    # 4. Check if the question asks to "Count" things or calculate "Revenue"
+    if "count" in q or "how many" in q:
+        # Returns the total number of orders matching the criteria as an integer string
+        return str(len(filtered_df))
+    else:
+        # Returns total revenue sum formatted to two decimal points
+        total_revenue = filtered_df["amount_usd"].sum()
+        return f"{total_revenue:.2f}"
 
 @app.post("/answer")
 async def answer_endpoint(payload: QuestionRequest):
